@@ -13,58 +13,59 @@ import streamlit as st
 from streamlit_chat import message
 import io
 import asyncio
+from langchain.prompts.prompt import PromptTemplate
 
 load_dotenv()
-api_key = os.getenv('OPENAI_API_KEY')  
+api_key = os.getenv('OPENAI_API_KEY')
 
 # vectors = getDocEmbeds("gpt4.pdf")
 # qa = ChatVectorDBChain.from_llm(ChatOpenAI(model_name="gpt-3.5-turbo"), vectors, return_source_documents=True)
 
+
 async def main():
 
     async def storeDocEmbeds(file, filename):
-    
+
         reader = PdfReader(file)
-        corpus = ''.join([p.extract_text() for p in reader.pages if p.extract_text()])
-        
-        splitter =  RecursiveCharacterTextSplitter(chunk_size=1000,chunk_overlap=200,)
+        corpus = ''.join([p.extract_text()
+                         for p in reader.pages if p.extract_text()])
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, chunk_overlap=200)
         chunks = splitter.split_text(corpus)
-        
-        embeddings = OpenAIEmbeddings(openai_api_key = api_key)
+
+        embeddings = OpenAIEmbeddings(openai_api_key=api_key)
         vectors = FAISS.from_texts(chunks, embeddings)
-        
+
         with open(filename + ".pkl", "wb") as f:
             pickle.dump(vectors, f)
 
-        
     async def getDocEmbeds(file, filename):
-        
+
         if not os.path.isfile(filename + ".pkl"):
             await storeDocEmbeds(file, filename)
-        
+
         with open(filename + ".pkl", "rb") as f:
             global vectores
             vectors = pickle.load(f)
-            
+
         return vectors
-    
 
     async def conversational_chat(query):
-        result = qa({"question": query, "chat_history": st.session_state['history']})
+        result = qa(
+            {"question": query, "chat_history": st.session_state['history']})
         st.session_state['history'].append((query, result["answer"]))
         # print("Log: ")
         # print(st.session_state['history'])
         return result["answer"]
 
-
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo")
+    llm = ChatOpenAI(model_name="gpt-4")
     chain = load_qa_chain(llm, chain_type="stuff")
 
     if 'history' not in st.session_state:
         st.session_state['history'] = []
 
-
-    #Creating the chatbot interface
+    # Creating the chatbot interface
     st.title("PDFChat :")
 
     if 'ready' not in st.session_state:
@@ -75,12 +76,27 @@ async def main():
     if uploaded_file is not None:
 
         with st.spinner("Processing..."):
-        # Add your code here that needs to be executed
+
+            prompt_template = """Utilize os seguintes elementos de contexto para responder à pergunta no final e pode realizar calculos para chegar na resposta.
+
+            {context}
+
+            Questão: {question}"""
+            QA_PROMPT = PromptTemplate(
+                template=prompt_template, input_variables=[
+                    "context", "question"]
+            )
+
+            # Add your code here that needs to be executed
             uploaded_file.seek(0)
             file = uploaded_file.read()
             # pdf = PyPDF2.PdfFileReader()
             vectors = await getDocEmbeds(io.BytesIO(file), uploaded_file.name)
-            qa = ConversationalRetrievalChain.from_llm(ChatOpenAI(model_name="gpt-3.5-turbo"), retriever=vectors.as_retriever(), return_source_documents=True)
+            qa = ConversationalRetrievalChain.from_llm(ChatOpenAI(
+                model_name="gpt-4"),
+                retriever=vectors.as_retriever(),
+                return_source_documents=True,
+                qa_prompt=QA_PROMPT)
 
         st.session_state['ready'] = True
 
@@ -89,7 +105,8 @@ async def main():
     if st.session_state['ready']:
 
         if 'generated' not in st.session_state:
-            st.session_state['generated'] = ["Welcome! You can now ask any questions regarding " + uploaded_file.name]
+            st.session_state['generated'] = [
+                "Welcome! You can now ask any questions regarding " + uploaded_file.name]
 
         if 'past' not in st.session_state:
             st.session_state['past'] = ["Hey!"]
@@ -102,7 +119,8 @@ async def main():
 
         with container:
             with st.form(key='my_form', clear_on_submit=True):
-                user_input = st.text_input("Query:", placeholder="e.g: Summarize the paper in a few sentences", key='input')
+                user_input = st.text_input(
+                    "Query:", placeholder="e.g: Summarize the paper in a few sentences", key='input')
                 submit_button = st.form_submit_button(label='Send')
 
             if submit_button and user_input:
@@ -113,8 +131,10 @@ async def main():
         if st.session_state['generated']:
             with response_container:
                 for i in range(len(st.session_state['generated'])):
-                    message(st.session_state["past"][i], is_user=True, key=str(i) + '_user', avatar_style="thumbs")
-                    message(st.session_state["generated"][i], key=str(i), avatar_style="fun-emoji")
+                    message(st.session_state["past"][i], is_user=True, key=str(
+                        i) + '_user', avatar_style="thumbs")
+                    message(st.session_state["generated"][i], key=str(
+                        i), avatar_style="fun-emoji")
 
 
 if __name__ == "__main__":
